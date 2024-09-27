@@ -1,6 +1,8 @@
     package com.example.fruitmaster4000
 
     import android.app.ProgressDialog
+    import android.content.Context.MODE_PRIVATE
+    import android.content.pm.PackageManager
     import android.graphics.Rect
     import android.location.GpsStatus
     import android.location.Location
@@ -32,7 +34,13 @@
     import androidx.compose.runtime.*
     import androidx.compose.ui.platform.LocalContext
     import androidx.compose.ui.viewinterop.AndroidView
+    import androidx.core.content.ContextCompat
     import org.osmdroid.util.GeoPoint
+    import com.google.android.gms.location.FusedLocationProviderClient
+    import com.google.android.gms.location.LocationServices
+    import android.Manifest
+    import android.annotation.SuppressLint
+    import androidx.core.app.ActivityCompat
 
 
     class MainActivity : ComponentActivity(), MapListener, GpsStatus.Listener {
@@ -40,16 +48,35 @@
 //        lateinit var mMap: MapView
 //        lateinit var controller: IMapController;
 //        lateinit var mMyLocationOverlay: MyLocationNewOverlay;
+        private lateinit var fusedLocationClient: FusedLocationProviderClient
+        private var mapView: MapView? = null
         override fun onCreate(savedInstanceState: Bundle?) {
             super.onCreate(savedInstanceState)
+
+            // Initialize FusedLocationProviderClient early in onCreate
+            fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
             Configuration.getInstance().load(
                 applicationContext,
                 getSharedPreferences(getString(R.string.app_name), MODE_PRIVATE)
             )
 
             setContent {
-                MapScreen()
+                MapScreen { mapView ->
+                    this.mapView = mapView  // Store the mapView instance
+                }
             }
+
+    // Check for location permissions and retrieve the GPS location
+    if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+        getDeviceLocation()
+    } else {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+            LOCATION_PERMISSION_REQUEST_CODE
+        )
+    }
 
 
         }
@@ -75,155 +102,99 @@
             TODO("Not yet implemented")
         }
 
+        private fun getLocation() {
+            val Somewhere = GeoPoint(33.989820, -81.029123)
+        }
+
+        @SuppressLint("MissingPermission")
+        private fun getDeviceLocation() {
+            fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                if (location != null) {
+                    // We have the location, pass it to the map
+                    val deviceGeoPoint = GeoPoint(location.latitude, location.longitude)
+                    setMapLocation(deviceGeoPoint)
+                } else {
+                    Log.e("MainActivity", "Unable to retrieve location.")
+                }
+            }
+        }
+
+            private fun setMapLocation(geoPoint: GeoPoint) {
+                runOnUiThread {
+                    // Assuming you have a map controller from the MapView in your Composable
+                    mapView?.controller?.apply {
+                        setCenter(geoPoint)
+                        setZoom(15.0) // Set a suitable zoom level for the user's location
+                    }
+                }
+            }
+
+            companion object {
+                private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
+            }
+
 
     }
 
-        @Composable
-        fun MapScreen() {
-            val context = LocalContext.current
-            var mapView by remember { mutableStateOf<MapView?>(null) }
-            var myLocationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
+    @Composable
+    fun MapScreen(onMapReady: (MapView) -> Unit) {
+        val context = LocalContext.current
+        var mapView by remember { mutableStateOf<MapView?>(null) }
+        var myLocationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
 
-            AndroidView(
-                factory = { ctx ->
-                    MapView(ctx).apply {
-                        setTileSource(TileSourceFactory.MAPNIK)
-                        setMultiTouchControls(true)
-                        controller.setZoom(6.0)
+        AndroidView(
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    // Initialize osmdroid configuration
+                    Configuration.getInstance().load(
+                        ctx,
+                        ctx.getSharedPreferences(ctx.getString(R.string.app_name), MODE_PRIVATE)
+                    )
 
-                        myLocationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), this).apply {
-                            enableMyLocation()
-                            enableFollowLocation()
-                            isDrawAccuracyEnabled = true
-                            runOnFirstFix {
-                                context as ComponentActivity
-                                context.runOnUiThread {
-                                    controller.setCenter(myLocation)
-                                    controller.animateTo(myLocation)
-                                }
-                            }
+                    setTileSource(TileSourceFactory.MAPNIK)
+                    setMultiTouchControls(true)
+                    controller.setZoom(18.0)
+
+                    val somewhere = GeoPoint(-23.5402, -46.6524)
+
+                    controller.setCenter(somewhere)
+
+                    myLocationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), this).apply {
+                        enableMyLocation()
+                        enableFollowLocation()
+                        isDrawAccuracyEnabled = true
+//                        runOnFirstFix {
+//                            context as ComponentActivity
+//                            context.runOnUiThread {
+//                                controller.setCenter(somewhere)
+//                                controller.animateTo(somewhere)
+//                            }
+//                        }
+                    }
+
+                    overlays.add(myLocationOverlay)
+
+                    addMapListener(object : MapListener {
+                        override fun onScroll(event: ScrollEvent?): Boolean {
+                            Log.e("TAG", "onCreate:la ${event?.source?.mapCenter?.latitude}")
+                            Log.e("TAG", "onCreate:lo ${event?.source?.mapCenter?.longitude}")
+                            return true
                         }
 
-                        overlays.add(myLocationOverlay)
+                        override fun onZoom(event: ZoomEvent?): Boolean {
+                            Log.e("TAG", "onZoom zoom level: ${event?.zoomLevel}   source:  ${event?.source}")
+                            return false
+                        }
+                    })
 
-                        addMapListener(object : MapListener {
-                            override fun onScroll(event: ScrollEvent?): Boolean {
-                                Log.e("TAG", "onCreate:la ${event?.source?.mapCenter?.latitude}")
-                                Log.e("TAG", "onCreate:lo ${event?.source?.mapCenter?.longitude}")
-                                return true
-                            }
-
-                            override fun onZoom(event: ZoomEvent?): Boolean {
-                                Log.e("TAG", "onZoom zoom level: ${event?.zoomLevel}   source:  ${event?.source}")
-                                return false
-                            }
-                        })
-
-                        mapView = this
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-                update = { view ->
-                    // You can update the map view here if needed
+                    mapView = this
                 }
-            )
+            },
+            modifier = Modifier.fillMaxSize(),
+            update = { view ->
+                // You can update the map view here if needed
+            }
+        )
 
-            // You can add more Compose UI elements here if needed
-        }
-
-//    import android.os.Bundle
-//    import android.Manifest
-//    import android.content.pm.PackageManager
-//    import android.widget.Toast
-//    import androidx.appcompat.app.AppCompatActivity
-//    import androidx.core.app.ActivityCompat
-//    import androidx.core.content.ContextCompat
-//    import com.google.android.gms.location.FusedLocationProviderClient
-//    import com.google.android.gms.location.LocationServices
-//    import org.osmdroid.config.Configuration
-//    import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-//    import org.osmdroid.util.GeoPoint
-//    import org.osmdroid.views.MapView
-//    import com.example.fruitmaster4000.databinding.ActivityMainBinding
-
-//    class MainActivity : AppCompatActivity() {
-//
-//        private lateinit var binding: ActivityMainBinding
-//        private lateinit var mapView: MapView
-//        private lateinit var fusedLocationClient: FusedLocationProviderClient
-//        private val LOCATION_PERMISSION_REQUEST_CODE = 1
-//
-//        override fun onCreate(savedInstanceState: Bundle?) {
-//            super.onCreate(savedInstanceState)
-//
-//            // Initialize the OpenStreetMap configuration
-//            Configuration.getInstance().load(applicationContext, getPreferences(MODE_PRIVATE))
-//
-//            binding = ActivityMainBinding.inflate(layoutInflater)
-//            setContentView(binding.root)
-//
-//            mapView = binding.mapView
-//            mapView.setTileSource(TileSourceFactory.MAPNIK)
-//
-//            fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-//
-//            requestLocationPermission()
-//        }
-//
-//        private fun requestLocationPermission() {
-//            if (ContextCompat.checkSelfPermission(
-//                    this,
-//                    Manifest.permission.ACCESS_FINE_LOCATION
-//                ) != PackageManager.PERMISSION_GRANTED
-//            ) {
-//                ActivityCompat.requestPermissions(
-//                    this,
-//                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
-//                    LOCATION_PERMISSION_REQUEST_CODE
-//                )
-//            } else {
-//                getLocation()
-//            }
-//        }
-//
-//        override fun onRequestPermissionsResult(
-//            requestCode: Int,
-//            permissions: Array<out String>,
-//            grantResults: IntArray
-//        ) {
-//            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-//            if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
-//                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-//                    getLocation()
-//                } else {
-//                    Toast.makeText(this, "Location permission denied", Toast.LENGTH_SHORT).show()
-//                }
-//            }
-//        }
-//
-//        private fun getLocation() {
-//            if (ActivityCompat.checkSelfPermission(
-//                    this,
-//                    Manifest.permission.ACCESS_FINE_LOCATION
-//                ) == PackageManager.PERMISSION_GRANTED
-//            ) {
-//                fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-//                    location?.let {
-//                        val currentLocation = GeoPoint(it.latitude, it.longitude)
-//                        mapView.controller.setCenter(currentLocation)
-//                        mapView.controller.setZoom(15.0)
-//                    }
-//                }
-//            }
-//        }
-//
-//        override fun onResume() {
-//            super.onResume()
-//            mapView.onResume()
-//        }
-//
-//        override fun onPause() {
-//            super.onPause()
-//            mapView.onPause()
-//        }
-//    }
+        // You can add more Compose UI elements here if needed
+    }
