@@ -40,8 +40,19 @@
     import com.google.android.gms.location.LocationServices
     import android.Manifest
     import android.annotation.SuppressLint
+    import android.widget.Toast
+    import androidx.compose.foundation.layout.Box
+    import androidx.compose.foundation.layout.padding
+    import androidx.compose.material.icons.Icons
+    import androidx.compose.material.icons.filled.Add
+    import androidx.compose.material3.Button
+    import androidx.compose.material3.FloatingActionButton
+    import androidx.compose.material3.Icon
+    import androidx.compose.material3.Text
+    import androidx.compose.ui.Alignment
+    import androidx.compose.ui.unit.dp
     import androidx.core.app.ActivityCompat
-
+    import kotlinx.coroutines.launch
 
     class MainActivity : ComponentActivity(), MapListener, GpsStatus.Listener {
 
@@ -53,7 +64,7 @@
         override fun onCreate(savedInstanceState: Bundle?) {
             super.onCreate(savedInstanceState)
 
-            // Initialize FusedLocationProviderClient early in onCreate
+            // Initialize FusedLocationProviderClient
             fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
             Configuration.getInstance().load(
@@ -102,10 +113,6 @@
             TODO("Not yet implemented")
         }
 
-        private fun getLocation() {
-            val Somewhere = GeoPoint(33.989820, -81.029123)
-        }
-
         @SuppressLint("MissingPermission")
         private fun getDeviceLocation() {
             fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
@@ -121,10 +128,9 @@
 
             private fun setMapLocation(geoPoint: GeoPoint) {
                 runOnUiThread {
-                    // Assuming you have a map controller from the MapView in your Composable
                     mapView?.controller?.apply {
                         setCenter(geoPoint)
-                        setZoom(15.0) // Set a suitable zoom level for the user's location
+                        setZoom(18.0)
                     }
                 }
             }
@@ -141,60 +147,78 @@
         val context = LocalContext.current
         var mapView by remember { mutableStateOf<MapView?>(null) }
         var myLocationOverlay by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
+        val coroutineScope = rememberCoroutineScope()
 
-        AndroidView(
-            factory = { ctx ->
-                MapView(ctx).apply {
-                    // Initialize osmdroid configuration
-                    Configuration.getInstance().load(
-                        ctx,
-                        ctx.getSharedPreferences(ctx.getString(R.string.app_name), MODE_PRIVATE)
-                    )
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                factory = { ctx ->
+                    MapView(ctx).apply {
+                        // Initialize osmdroid configuration
+                        Configuration.getInstance().load(
+                            ctx,
+                            ctx.getSharedPreferences(ctx.getString(R.string.app_name), MODE_PRIVATE)
+                        )
 
-                    setTileSource(TileSourceFactory.MAPNIK)
-                    setMultiTouchControls(true)
-                    controller.setZoom(18.0)
+                        setTileSource(TileSourceFactory.MAPNIK)
+                        setMultiTouchControls(true)
+                        controller.setZoom(18.0)
 
-                    val somewhere = GeoPoint(-23.5402, -46.6524)
+                        myLocationOverlay =
+                            MyLocationNewOverlay(GpsMyLocationProvider(context), this).apply {
+                                enableMyLocation()
+                                enableFollowLocation()
+                                isDrawAccuracyEnabled = true
+                            }
 
-                    controller.setCenter(somewhere)
+                        overlays.add(myLocationOverlay)
 
-                    myLocationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(context), this).apply {
-                        enableMyLocation()
-                        enableFollowLocation()
-                        isDrawAccuracyEnabled = true
-//                        runOnFirstFix {
-//                            context as ComponentActivity
-//                            context.runOnUiThread {
-//                                controller.setCenter(somewhere)
-//                                controller.animateTo(somewhere)
-//                            }
-//                        }
+                        addMapListener(object : MapListener {
+                            override fun onScroll(event: ScrollEvent?): Boolean {
+                                Log.e("TAG", "onCreate:la ${event?.source?.mapCenter?.latitude}")
+                                Log.e("TAG", "onCreate:lo ${event?.source?.mapCenter?.longitude}")
+                                return true
+                            }
+
+                            override fun onZoom(event: ZoomEvent?): Boolean {
+                                Log.e(
+                                    "TAG",
+                                    "onZoom zoom level: ${event?.zoomLevel}   source:  ${event?.source}"
+                                )
+                                return false
+                            }
+                        })
+
+                        mapView = this
                     }
-
-                    overlays.add(myLocationOverlay)
-
-                    addMapListener(object : MapListener {
-                        override fun onScroll(event: ScrollEvent?): Boolean {
-                            Log.e("TAG", "onCreate:la ${event?.source?.mapCenter?.latitude}")
-                            Log.e("TAG", "onCreate:lo ${event?.source?.mapCenter?.longitude}")
-                            return true
-                        }
-
-                        override fun onZoom(event: ZoomEvent?): Boolean {
-                            Log.e("TAG", "onZoom zoom level: ${event?.zoomLevel}   source:  ${event?.source}")
-                            return false
-                        }
-                    })
-
-                    mapView = this
+                },
+                modifier = Modifier.fillMaxSize(),
+                update = { view ->
+                    // Update map view
                 }
-            },
-            modifier = Modifier.fillMaxSize(),
-            update = { view ->
-                // You can update the map view here if needed
-            }
-        )
+            )
 
-        // You can add more Compose UI elements here if needed
+            FloatingActionButton(
+                onClick = {
+                    coroutineScope.launch {
+                        mapView?.let { map ->
+                            val currentLocation = map.mapCenter
+                            val geoPoint =
+                                GeoPoint(currentLocation.latitude, currentLocation.longitude)
+                            saveLocation(geoPoint)
+                            Toast.makeText(context, "Location saved!", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+            ) {
+                Icon(Icons.Filled.Add, contentDescription = "Save Location")
+            }
+        }
+    }
+
+    suspend fun saveLocation(location: GeoPoint) {
+        // Save current location to database
+        Log.d("MapScreen", "Saving location: ${location.latitude}, ${location.longitude}")
     }
