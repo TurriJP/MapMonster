@@ -40,9 +40,13 @@
     import com.google.android.gms.location.LocationServices
     import android.Manifest
     import android.annotation.SuppressLint
+    import android.graphics.Point
     import android.widget.Toast
     import androidx.compose.foundation.layout.Box
+    import androidx.compose.foundation.layout.Column
     import androidx.compose.foundation.layout.padding
+    import androidx.compose.foundation.lazy.LazyColumn
+    import androidx.compose.foundation.lazy.items
     import androidx.compose.material.icons.Icons
     import androidx.compose.material.icons.filled.Add
     import androidx.compose.material3.Button
@@ -52,7 +56,19 @@
     import androidx.compose.ui.Alignment
     import androidx.compose.ui.unit.dp
     import androidx.core.app.ActivityCompat
+    import androidx.navigation.compose.NavHost
+    import androidx.navigation.compose.composable
+    import androidx.navigation.compose.rememberNavController
+    import io.realm.Realm
+    import io.realm.RealmConfiguration
+    import io.realm.RealmObject
+    import io.realm.annotations.PrimaryKey
+    import kotlinx.coroutines.CoroutineScope
+    import kotlinx.coroutines.Dispatchers
     import kotlinx.coroutines.launch
+    import org.bson.types.ObjectId
+    import java.math.BigDecimal
+    import java.util.Date
 
     class MainActivity : ComponentActivity(), MapListener, GpsStatus.Listener {
 
@@ -63,6 +79,7 @@
         private var mapView: MapView? = null
         override fun onCreate(savedInstanceState: Bundle?) {
             super.onCreate(savedInstanceState)
+            initiateRealm()
 
             // Initialize FusedLocationProviderClient
             fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -138,6 +155,19 @@
             companion object {
                 private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
             }
+
+        private fun initiateRealm(){
+            Realm.init(this)
+            val config = RealmConfiguration.Builder()
+                .name("Fruitmaster.realm")
+                .allowWritesOnUiThread(false)
+                .allowQueriesOnUiThread(false)
+                .schemaVersion(2)
+                .deleteRealmIfMigrationNeeded() //debug
+//                .migration(Migration())
+                .build()
+            Realm.setDefaultConfiguration(config)
+        }
 
 
     }
@@ -218,7 +248,78 @@
         }
     }
 
+    @Composable
+    fun MainScreen() {
+        val navController = rememberNavController()
+        val savedLocations = remember { mutableStateListOf<PointEntity>() }
+
+        NavHost(navController = navController, startDestination = "map") {
+            composable("map") {
+                MapScreen(
+                    onSaveLocation = { latitude, longitude ->
+                        savedLocations.add(SavedLocation(savedLocations.size + 1, latitude, longitude))
+                    },
+                    onViewSavedLocations = {
+                        navController.navigate("savedLocations")
+                    }
+                )
+            }
+            composable("savedLocations") {
+                SavedLocationsScreen(
+                    locations = savedLocations,
+                    onBackClick = {
+                        navController.navigateUp()
+                    }
+                )
+            }
+        }
+    }
+
     suspend fun saveLocation(location: GeoPoint) {
         // Save current location to database
         Log.d("MapScreen", "Saving location: ${location.latitude}, ${location.longitude}")
+        CoroutineScope(Dispatchers.IO).launch {
+            var personalDetail = PointEntity().apply {
+                name = "Mockado"
+                lat = location.latitude
+                lon = location.longitude
+            }
+
+            var realmDb = Realm.getDefaultInstance() // get default Instance
+            realmDb.beginTransaction()
+            realmDb.copyToRealmOrUpdate(personalDetail) // insert or update the data
+            realmDb.commitTransaction()
+            realmDb.close()
+        }
+    }
+
+    fun getLocations(config:RealmConfiguration) : List<PointEntity> {
+        val realm = Realm.getDefaultInstance()
+        val locations = realm.query<PointEntity>().find()
+    }
+
+    open class PointEntity : RealmObject(){
+        @PrimaryKey
+        var _id : ObjectId = ObjectId()
+
+        var name : String? = null
+        var hexcolor : String? = null
+        var lat : Double? = null
+        var lon : Double? = null
+//        var created_at : Date? = null
+
+    }
+
+    @Composable
+    fun SavedLocationsScreen(locations: List<PointEntity>, onBackClick: () -> Unit) {
+        Column {
+            Button(onClick = onBackClick) {
+                Text("Back to Map")
+            }
+            LazyColumn {
+                items(locations) { location ->
+                    Text("Location ${location._id}: ${location.lat}, ${location.lon}")
+                }
+            }
+        }
     }
